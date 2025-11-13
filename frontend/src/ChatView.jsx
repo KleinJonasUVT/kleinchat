@@ -14,15 +14,51 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const messagesEndRef = useRef(null);
   const currentMessageRef = useRef('');
+  const textareaRef = useRef(null);
+  const previousChatIdRef = useRef(null);
+  const previousMessagesCountRef = useRef(0);
+
+  const deleteEmptyChat = async (id) => {
+    try {
+      const response = await fetch(`http://localhost:5001/api/chats/${id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        // Refresh the chat list in the sidebar
+        if (onChatUpdate) {
+          onChatUpdate();
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting empty chat:', error);
+    }
+  };
 
   // Load chat messages when chatId changes
   useEffect(() => {
+    const previousChatId = previousChatIdRef.current;
+    const previousMessagesCount = previousMessagesCountRef.current;
+    
+    // If we're switching to a new chat and the previous chat was empty, delete it
+    if (previousChatId && chatId && previousChatId !== chatId && previousMessagesCount === 0) {
+      deleteEmptyChat(previousChatId);
+    }
+    
+    // Update refs before loading new chat
+    previousChatIdRef.current = chatId;
+    
     if (chatId) {
       loadChat(chatId);
     } else {
       setMessages([]);
+      previousMessagesCountRef.current = 0;
     }
   }, [chatId]);
+
+  // Track message count for the current chat
+  useEffect(() => {
+    previousMessagesCountRef.current = messages.length;
+  }, [messages.length]);
 
   const loadChat = async (id) => {
     try {
@@ -49,11 +85,23 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
     scrollToBottom();
   }, [messages]);
 
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
+
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
 
     const userMessage = input.trim();
     setInput('');
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setIsStreaming(true);
 
     // Add user message
@@ -147,6 +195,7 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
       e.preventDefault();
       sendMessage();
     }
+    // Allow Shift+Enter for new lines
   };
 
   const copyMessage = async (content, index) => {
@@ -177,10 +226,11 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
     <div className="main-content-wrapper">
       {/* Header */}
       <div className="app-header">
+        <img src="/images/jk_letters.png" alt="JK" className="header-logo" />
         <span className="header-title">KleinChat</span>
       </div>
       <div className="main-content">
-        <div className="messages-container">
+        <div className={`messages-container ${messages.length > 0 ? 'has-messages' : ''}`}>
           {messages.length === 0 ? (
             <div className="empty-state">
               <div className="empty-text">Start a conversation</div>
@@ -237,14 +287,15 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
         {/* Input Area */}
         <div className="input-area">
           <div className="input-wrapper">
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               className="message-input"
               placeholder="Ask anything"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={isStreaming}
+              rows={1}
             />
             <button
               className="send-btn"
