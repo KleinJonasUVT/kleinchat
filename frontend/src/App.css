@@ -23,6 +23,7 @@
   height: 24px;
   width: auto;
   object-fit: contain;
+  display: block;
 }
 
 .header-title {
@@ -110,6 +111,7 @@
   height: 24px;
   width: auto;
   object-fit: contain;
+  display: block;
 }
 
 .sidebar.closed .sidebar-logo {
@@ -272,6 +274,7 @@
   overflow: hidden;
 }
 
+.chat-item-menu-rename,
 .chat-item-menu-delete {
   display: flex;
   align-items: center;
@@ -287,14 +290,45 @@
   text-align: left;
 }
 
-.chat-item-menu-delete:hover {
+.chat-item-menu-rename:hover {
   background-color: #f5f5f5;
+}
+
+.chat-item-menu-delete {
+  color: #dc2626;
+}
+
+.chat-item-menu-delete:hover {
+  background-color: #fee2e2;
+}
+
+.chat-item-menu-rename svg {
+  width: 16px;
+  height: 16px;
+  color: #666;
 }
 
 .chat-item-menu-delete svg {
   width: 16px;
   height: 16px;
-  color: #666;
+  color: #dc2626;
+}
+
+.chat-item-rename-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #007bff;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  background-color: #ffffff;
+  color: #333;
+}
+
+.chat-item-rename-input:focus {
+  border-color: #0056b3;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
 /* Main Content */
@@ -368,7 +402,6 @@
   font-size: 15px;
   line-height: 1.5;
   word-wrap: break-word;
-  max-width: 700px;
 }
 
 /* Markdown styling */
@@ -571,6 +604,11 @@
 
 .message.assistant .message-content {
   color: #333;
+  max-width: 100%;
+}
+
+.message.user .message-content {
+  max-width: 80%;
 }
 
 .message-content .fa-circle {
@@ -581,14 +619,12 @@
 .message-copy-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  justify-content: center;
+  padding: 6px;
   margin-top: 8px;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 13px;
-  color: #666;
   border-radius: 6px;
   transition: background-color 0.2s, color 0.2s;
   align-self: flex-start;
@@ -600,7 +636,6 @@
 
 .message-copy-btn:hover {
   background-color: #f5f5f5;
-  color: #333;
 }
 
 .message-copy-btn svg {
@@ -612,10 +647,6 @@
 
 .message-copy-btn:hover svg {
   color: #333;
-}
-
-.message-copy-btn span {
-  font-size: 13px;
 }
 
 

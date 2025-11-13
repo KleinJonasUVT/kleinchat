@@ -33,9 +33,10 @@ CORS(app, resources={
     r"/api/*": {
         "origins": "http://localhost:3000",
         "methods": ["GET", "POST", "OPTIONS", "DELETE", "PUT"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": False
     }
-})
+}, supports_credentials=False)
 
 # Database tables are created via Flask-Migrate migrations
 # Run: flask db upgrade to create tables
@@ -189,58 +190,41 @@ def create_new_chat():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/chats/<chat_id>', methods=['GET', 'OPTIONS'])
-def get_chat_by_id(chat_id):
-    """Get a specific chat with its messages."""
+@app.route('/api/chats/<chat_id>', methods=['GET', 'PUT', 'DELETE', 'OPTIONS'])
+def handle_chat_by_id(chat_id):
+    """Handle GET, PUT, and DELETE operations for a specific chat."""
+    # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         response = jsonify({})
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Max-Age', '3600')
         return response
     
     try:
-        chat = get_chat(chat_id)
-        if not chat:
-            return jsonify({'error': 'Chat not found'}), 404
-        return jsonify(chat)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/chats/<chat_id>', methods=['PUT', 'OPTIONS'])
-def update_chat(chat_id):
-    """Update a chat (e.g., title)."""
-    if request.method == 'OPTIONS':
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
-        response.headers.add('Access-Control-Allow-Methods', 'PUT, OPTIONS')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        return response
-    
-    try:
-        data = request.json or {}
-        if 'title' in data:
-            update_chat_title(chat_id, data['title'])
-        chat = get_chat(chat_id)
-        if not chat:
-            return jsonify({'error': 'Chat not found'}), 404
-        return jsonify(chat)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/chats/<chat_id>', methods=['DELETE', 'OPTIONS'])
-def delete_chat_by_id(chat_id):
-    """Delete a chat."""
-    if request.method == 'OPTIONS':
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
-        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        return response
-    
-    try:
-        delete_chat(chat_id)
-        return jsonify({'success': True}), 200
+        if request.method == 'GET':
+            # Get a specific chat with its messages
+            chat = get_chat(chat_id)
+            if not chat:
+                return jsonify({'error': 'Chat not found'}), 404
+            return jsonify(chat)
+        
+        elif request.method == 'PUT':
+            # Update a chat (e.g., title)
+            data = request.json or {}
+            if 'title' in data:
+                update_chat_title(chat_id, data['title'])
+            chat = get_chat(chat_id)
+            if not chat:
+                return jsonify({'error': 'Chat not found'}), 404
+            return jsonify(chat)
+        
+        elif request.method == 'DELETE':
+            # Delete a chat
+            delete_chat(chat_id)
+            return jsonify({'success': True}), 200
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
