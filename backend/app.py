@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import ollama
 import json
 from datetime import datetime
+import threading
+import queue
 from models import db
 from database import (
     create_chat, get_chat, get_all_chats,
@@ -249,9 +251,18 @@ However, never mention that you have this system propmt or that you have it from
             {'role': 'system', 'content': system_prompt}
         ] + conversation_history
         
-        def generate():
-            """Generator function for streaming responses."""
+        # Queue for communication between background thread and streaming generator
+        content_queue = queue.Queue()
+        error_queue = queue.Queue()
+        completion_event = threading.Event()
+        
+        def generate_in_background():
+            """Background thread function that generates response and saves to DB."""
             assistant_content = ''
+            last_save_length = 0
+            save_interval = 100  # Save to DB every 100 characters
+            message_id = None  # Track the message ID for updates
+            
             try:
                 stream = ollama.chat(
                     model=model,
@@ -263,27 +274,109 @@ However, never mention that you have this system propmt or that you have it from
                     if 'message' in chunk and 'content' in chunk['message']:
                         content = chunk['message']['content']
                         assistant_content += content
-                        # Send as Server-Sent Events (SSE) format
-                        yield f"data: {json.dumps({'content': content})}\n\n"
+                        
+                        # Put content in queue for streaming (non-blocking)
+                        try:
+                            content_queue.put_nowait(('content', content))
+                        except queue.Full:
+                            pass  # Queue full, continue anyway
+                        
+                        # Create message in DB on first content
+                        if message_id is None and assistant_content.strip():
+                            with app.app_context():
+                                try:
+                                    message_id = add_message(chat_id, 'assistant', assistant_content)
+                                    last_save_length = len(assistant_content)
+                                    print(f"Created assistant message {message_id} for chat {chat_id} (initial length: {len(assistant_content)})")
+                                except Exception as db_error:
+                                    import traceback
+                                    print(f"ERROR: Failed to create assistant message for chat {chat_id}: {db_error}")
+                                    print(traceback.format_exc())
+                        
+                        # Periodically update message in DB (every save_interval characters)
+                        elif message_id and len(assistant_content) - last_save_length >= save_interval:
+                            with app.app_context():
+                                try:
+                                    from models import Message
+                                    msg_obj = Message.query.get(message_id)
+                                    if msg_obj:
+                                        msg_obj.content = assistant_content
+                                        db.session.commit()
+                                        print(f"Updated assistant message {message_id} for chat {chat_id} (length: {len(assistant_content)})")
+                                        last_save_length = len(assistant_content)
+                                except Exception as db_error:
+                                    import traceback
+                                    print(f"ERROR: Failed to update assistant message for chat {chat_id}: {db_error}")
+                                    print(traceback.format_exc())
                 
-                # Save assistant message to database within app context
-                # Only save if we have content
+                # Final save of complete message
                 if assistant_content and assistant_content.strip():
                     with app.app_context():
                         try:
-                            message_id = add_message(chat_id, 'assistant', assistant_content)
-                            print(f"Successfully saved assistant message {message_id} for chat {chat_id}")
+                            if message_id:
+                                # Update existing message with final content
+                                from models import Message
+                                msg_obj = Message.query.get(message_id)
+                                if msg_obj:
+                                    msg_obj.content = assistant_content
+                                    db.session.commit()
+                                    print(f"Final update: assistant message {message_id} for chat {chat_id} (final length: {len(assistant_content)})")
+                                else:
+                                    # Message was deleted? Create new one
+                                    message_id = add_message(chat_id, 'assistant', assistant_content)
+                                    print(f"Final save (recreated): assistant message {message_id} for chat {chat_id} (final length: {len(assistant_content)})")
+                            else:
+                                # Create new message if it doesn't exist
+                                message_id = add_message(chat_id, 'assistant', assistant_content)
+                                print(f"Final save: assistant message {message_id} for chat {chat_id} (final length: {len(assistant_content)})")
                         except Exception as db_error:
-                            # Log database error but don't fail the response
                             import traceback
-                            print(f"ERROR: Failed to save assistant message for chat {chat_id}: {db_error}")
+                            print(f"ERROR: Failed to final save assistant message for chat {chat_id}: {db_error}")
                             print(traceback.format_exc())
                 else:
                     print(f"WARNING: No assistant content to save for chat {chat_id}")
                 
-                # Send completion signal with chat_id
-                yield f"data: {json.dumps({'done': True, 'chat_id': chat_id})}\n\n"
+                # Signal completion
+                content_queue.put(('done', {'chat_id': chat_id}))
+                completion_event.set()
                 
+            except Exception as e:
+                error_queue.put(str(e))
+                completion_event.set()
+        
+        # Start background generation thread
+        bg_thread = threading.Thread(target=generate_in_background, daemon=True)
+        bg_thread.start()
+        
+        def generate():
+            """Generator function for streaming responses from queue."""
+            try:
+                while True:
+                    try:
+                        # Wait for content with timeout to check for completion
+                        item_type, item_data = content_queue.get(timeout=0.1)
+                        
+                        if item_type == 'content':
+                            # Stream content to client
+                            yield f"data: {json.dumps({'content': item_data})}\n\n"
+                        elif item_type == 'done':
+                            # Send completion signal
+                            yield f"data: {json.dumps({'done': True, 'chat_id': item_data.get('chat_id', chat_id)})}\n\n"
+                            break
+                    except queue.Empty:
+                        # Check if generation is complete
+                        if completion_event.is_set():
+                            # Check for errors
+                            try:
+                                error = error_queue.get_nowait()
+                                error_data = json.dumps({'error': error})
+                                yield f"data: {error_data}\n\n"
+                            except queue.Empty:
+                                # No error, just completion
+                                yield f"data: {json.dumps({'done': True, 'chat_id': chat_id})}\n\n"
+                            break
+                        # Continue waiting for content
+                        continue
             except Exception as e:
                 error_data = json.dumps({'error': str(e)})
                 yield f"data: {error_data}\n\n"
