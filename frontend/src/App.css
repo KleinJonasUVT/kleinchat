@@ -32,6 +32,121 @@
   color: #333;
 }
 
+.header-menu-wrapper {
+  position: relative;
+  margin-left: auto;
+}
+
+.header-menu-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background-color: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+  color: #666;
+}
+
+.header-menu-btn:hover {
+  background-color: #f5f5f5;
+}
+
+.header-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background-color: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-width: 180px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.header-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background-color 0.2s;
+  text-align: left;
+}
+
+.header-menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+.header-menu-item svg {
+  width: 16px;
+  height: 16px;
+  color: #666;
+}
+
+.header-menu-item.header-menu-delete {
+  color: #dc2626;
+}
+
+.header-menu-item.header-menu-delete:hover {
+  background-color: #fee2e2;
+}
+
+.header-menu-item.header-menu-delete svg {
+  color: #dc2626;
+}
+
+.header-menu-rename-input-wrapper {
+  padding: 12px 16px;
+}
+
+.header-menu-rename-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+}
+
+.header-menu-rename-input:focus {
+  border-color: #007bff;
+}
+
+.chat-item-menu-download {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background-color 0.2s;
+  text-align: left;
+}
+
+.chat-item-menu-download:hover {
+  background-color: #f5f5f5;
+}
+
+.chat-item-menu-download svg {
+  width: 16px;
+  height: 16px;
+  color: #666;
+}
+
 /* Sidebar Toggle Button */
 .sidebar .sidebar-toggle {
   width: 32px;
@@ -122,7 +237,36 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px 12px 2px;
+  background-color: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  margin: 8px 8px 12px 8px;
+  transition: background-color 0.2s;
+  justify-content: left;
+  color: #333;
+}
+
+.sidebar.closed .new-chat-btn {
+  padding: 12px 12px 0px 12px;
+  margin: 0 8px 12px 8px;
+}
+
+.sidebar.closed .new-chat-btn span {
+  display: none;
+}
+
+.sidebar.closed .new-chat-btn svg {
+  display: block;
+  width: 20px;
+}
+
+.chat-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background-color: transparent;
   border: none;
   border-radius: 8px;
@@ -135,19 +279,296 @@
   color: #333;
 }
 
-.sidebar.closed .new-chat-btn {
-  padding: 12px;
-  margin: 0 8px 24px 8px;
+.sidebar.closed .chat-search-btn {
+    padding: 0px 12px 0px 12px;
+    margin: 0 8px 12px 8px;
 }
 
-.sidebar.closed .new-chat-btn span {
+.sidebar.closed .chat-search-btn span {
   display: none;
 }
 
-.sidebar.closed .new-chat-btn svg {
+.sidebar.closed .chat-search-btn svg {
   display: block;
   width: 20px;
   height: 20px;
+}
+
+.chat-search-btn:hover {
+  background-color: transparent;
+}
+
+/* Search Modal */
+.search-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.search-modal {
+  background-color: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.search-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.search-modal-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.search-modal-input-wrapper:focus-within {
+  background-color: #ffffff;
+  border-color: #007bff;
+}
+
+.search-modal-input-wrapper svg {
+  width: 16px;
+  height: 16px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.search-modal-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  color: #333;
+  font-family: inherit;
+}
+
+.search-modal-input::placeholder {
+  color: #999;
+}
+
+.search-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #666;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.search-modal-close:hover {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.search-modal-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.search-modal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.search-modal-new-chat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.search-modal-new-chat:hover {
+  background-color: #f5f5f5;
+}
+
+.search-modal-new-chat svg {
+  width: 20px;
+  height: 20px;
+  color: #666;
+}
+
+.search-modal-new-chat span {
+  font-size: 14px;
+  color: #333;
+}
+
+.search-modal-section {
+  margin-top: 8px;
+}
+
+.search-modal-section-label {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #999;
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.search-modal-chat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.search-modal-chat-item:hover {
+  background-color: #f5f5f5;
+}
+
+.search-modal-chat-item svg {
+  width: 20px;
+  height: 20px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.search-modal-chat-item span {
+  font-size: 14px;
+  color: #333;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Delete Confirmation Modal */
+.delete-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.delete-modal {
+  background-color: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  padding: 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  animation: slideUp 0.2s ease-out;
+}
+
+.delete-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #000;
+  margin-bottom: 12px;
+}
+
+.delete-modal-message {
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.delete-modal-message strong {
+  font-weight: 600;
+  color: #000;
+}
+
+.delete-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.delete-modal-cancel {
+  padding: 10px 20px;
+  border: 1px solid #e0e0e0;
+  background-color: white;
+  color: #333;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.delete-modal-cancel:hover {
+  background-color: #f5f5f5;
+  border-color: #d0d0d0;
+}
+
+.delete-modal-confirm {
+  padding: 10px 20px;
+  border: 1px solid #dc2626;
+  background-color: #dc2626;
+  color: white;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.delete-modal-confirm:hover {
+  background-color: #b91c1c;
+  border-color: #b91c1c;
 }
 
 .new-chat-btn:hover {

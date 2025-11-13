@@ -5,13 +5,18 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useNavigate } from 'react-router-dom';
 import { CodeBlock } from './CodeBlock';
+import jsPDF from 'jspdf';
 
-function ChatView({ chatId, currentModel, onChatUpdate }) {
+function ChatView({ chatId, currentModel, onChatUpdate, onDeleteChat, onNewChat }) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
+  const [chatTitle, setChatTitle] = useState('');
+  const [openHeaderMenu, setOpenHeaderMenu] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState('');
   const messagesEndRef = useRef(null);
   const currentMessageRef = useRef('');
   const textareaRef = useRef(null);
@@ -60,11 +65,22 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
     previousMessagesCountRef.current = messages.length;
   }, [messages.length]);
 
+  // Focus input when chatId changes
+  useEffect(() => {
+    if (chatId && textareaRef.current) {
+      // Small delay to ensure the component is fully rendered
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+    }
+  }, [chatId]);
+
   const loadChat = async (id) => {
     try {
       const response = await fetch(`http://localhost:5001/api/chats/${id}`);
       if (response.ok) {
         const chat = await response.json();
+        setChatTitle(chat.title || 'Untitled Chat');
         // Convert database messages to display format
         const formattedMessages = chat.messages.map(msg => ({
           role: msg.role,
@@ -167,8 +183,8 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
                   navigate(`/c/${data.chat_id}`);
                 }
                 // Always refresh chat list to update title in sidebar
-                if (onChatUpdate) {
-                  onChatUpdate();
+                  if (onChatUpdate) {
+                    onChatUpdate();
                 }
                 setIsStreaming(false);
                 return;
@@ -222,12 +238,251 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
     }
   };
 
+  const downloadChatAsPDF = () => {
+    if (!chatId || messages.length === 0) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const maxWidth = pageWidth - 2 * margin;
+    let yPosition = margin;
+
+    // Add title
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    const titleLines = doc.splitTextToSize(chatTitle, maxWidth);
+    doc.text(titleLines, margin, yPosition);
+    yPosition += titleLines.length * 8 + 10;
+
+    // Add date
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 100, 100);
+    const dateStr = new Date().toLocaleDateString();
+    doc.text(`Exported on: ${dateStr}`, margin, yPosition);
+    yPosition += 10;
+
+    // Add messages
+    doc.setTextColor(0, 0, 0);
+    messages.forEach((msg, index) => {
+      // Check if we need a new page
+      if (yPosition > pageHeight - 40) {
+        doc.addPage();
+        yPosition = margin;
+      }
+
+      // Add role label
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      const roleLabel = msg.role === 'user' ? 'You' : 'Assistant';
+      doc.text(roleLabel, margin, yPosition);
+      yPosition += 8;
+
+      // Add message content
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      
+      // Strip markdown formatting for PDF (simple approach)
+      let textContent = msg.content;
+      // Remove code blocks
+      textContent = textContent.replace(/```[\s\S]*?```/g, '[Code block]');
+      // Remove inline code
+      textContent = textContent.replace(/`([^`]+)`/g, '$1');
+      // Remove markdown links
+      textContent = textContent.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+      // Remove markdown headers
+      textContent = textContent.replace(/^#+\s+/gm, '');
+      // Remove markdown bold/italic
+      textContent = textContent.replace(/\*\*([^\*]+)\*\*/g, '$1');
+      textContent = textContent.replace(/\*([^\*]+)\*/g, '$1');
+      
+      const contentLines = doc.splitTextToSize(textContent, maxWidth);
+      doc.text(contentLines, margin, yPosition);
+      yPosition += contentLines.length * 5 + 10;
+    });
+
+    // Save PDF
+    const fileName = `${chatTitle.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.pdf`;
+    doc.save(fileName);
+    setOpenHeaderMenu(false);
+  };
+
+  const handleRename = async () => {
+    if (!chatId || !tempTitle.trim()) {
+      setEditingTitle(false);
+      setTempTitle(chatTitle);
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5001/api/chats/${chatId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: tempTitle.trim() }),
+      });
+
+      if (response.ok) {
+        setChatTitle(tempTitle.trim());
+        setEditingTitle(false);
+        if (onChatUpdate) {
+          onChatUpdate();
+        }
+      } else {
+        alert('Failed to rename chat');
+        setTempTitle(chatTitle);
+      }
+    } catch (error) {
+      console.error('Error renaming chat:', error);
+      alert('Failed to rename chat');
+      setTempTitle(chatTitle);
+    }
+    setOpenHeaderMenu(false);
+  };
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (openHeaderMenu) {
+        const menuWrapper = event.target.closest('.header-menu-wrapper');
+        const menuDropdown = event.target.closest('.header-menu-dropdown');
+        // Only close if clicking outside both the wrapper and dropdown
+        if (!menuWrapper && !menuDropdown) {
+          setOpenHeaderMenu(false);
+        }
+      }
+    };
+
+    if (openHeaderMenu) {
+      // Use a slight delay to allow button clicks to register first
+      setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+      }, 0);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [openHeaderMenu]);
+
   return (
     <div className="main-content-wrapper">
       {/* Header */}
       <div className="app-header">
-        <img src="/images/jk_svg.svg" alt="JK" className="header-logo" />
-        <span className="header-title">KleinChat</span>
+        <img 
+          src="/images/jk_svg.svg" 
+          alt="JK" 
+          className="header-logo" 
+          onClick={() => {
+            if (onNewChat) {
+              onNewChat();
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+        />
+        <span 
+          className="header-title"
+          onClick={() => {
+            if (onNewChat) {
+              onNewChat();
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+        >
+          Jonas Klein Chat
+        </span>
+        {chatId && (
+          <div className="header-menu-wrapper">
+            <button
+              className="header-menu-btn"
+              onClick={() => setOpenHeaderMenu(!openHeaderMenu)}
+              aria-label="Chat options"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="icon">
+                <path d="M15.498 8.50159C16.3254 8.50159 16.9959 9.17228 16.9961 9.99963C16.9961 10.8271 16.3256 11.4987 15.498 11.4987C14.6705 11.4987 14 10.8271 14 9.99963C14.0002 9.17228 14.6706 8.50159 15.498 8.50159Z"></path>
+                <path d="M4.49805 8.50159C5.32544 8.50159 5.99689 9.17228 5.99707 9.99963C5.99707 10.8271 5.32555 11.4987 4.49805 11.4987C3.67069 11.4985 3 10.827 3 9.99963C3.00018 9.17239 3.6708 8.50176 4.49805 8.50159Z"></path>
+                <path d="M10.0003 8.50159C10.8276 8.50176 11.4982 9.17239 11.4984 9.99963C11.4984 10.827 10.8277 11.4985 10.0003 11.4987C9.17283 11.4987 8.50131 10.8271 8.50131 9.99963C8.50149 9.17228 9.17294 8.50159 10.0003 8.50159Z"></path>
+          </svg>
+            </button>
+            {openHeaderMenu && (
+              <div className="header-menu-dropdown">
+                {editingTitle ? (
+                  <div className="header-menu-rename-input-wrapper">
+                    <input
+                      className="header-menu-rename-input"
+                      value={tempTitle}
+                      onChange={(e) => setTempTitle(e.target.value)}
+                      onBlur={handleRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleRename();
+                        } else if (e.key === 'Escape') {
+                          setEditingTitle(false);
+                          setTempTitle(chatTitle);
+                          setOpenHeaderMenu(false);
+                        }
+                      }}
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <button
+                    className="header-menu-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTitle(true);
+                      setTempTitle(chatTitle);
+                    }}
+                    aria-label="Rename chat"
+                  >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="icon">
+                    <path d="M11.3312 3.56837C12.7488 2.28756 14.9376 2.33009 16.3038 3.6963L16.4318 3.83106C17.6712 5.20294 17.6712 7.29708 16.4318 8.66895L16.3038 8.80372L10.0118 15.0947C9.68833 15.4182 9.45378 15.6553 9.22179 15.8457L8.98742 16.0225C8.78227 16.1626 8.56423 16.2832 8.33703 16.3828L8.10753 16.4756C7.92576 16.5422 7.73836 16.5902 7.5216 16.6348L6.75695 16.7705L4.36339 17.169C4.22053 17.1928 4.06908 17.2188 3.94054 17.2285C3.84177 17.236 3.70827 17.2386 3.56261 17.2031L3.41417 17.1543C3.19115 17.0586 3.00741 16.8908 2.89171 16.6797L2.84581 16.5859C2.75951 16.3846 2.76168 16.1912 2.7716 16.0596C2.7813 15.931 2.80736 15.7796 2.83117 15.6367L3.2296 13.2432L3.36437 12.4785C3.40893 12.2616 3.45789 12.0745 3.52453 11.8926L3.6173 11.6621C3.71685 11.4352 3.83766 11.2176 3.97765 11.0127L4.15343 10.7783C4.34386 10.5462 4.58164 10.312 4.90538 9.98829L11.1964 3.6963L11.3312 3.56837ZM5.84581 10.9287C5.49664 11.2779 5.31252 11.4634 5.18663 11.6162L5.07531 11.7627C4.98188 11.8995 4.90151 12.0448 4.83507 12.1963L4.77355 12.3506C4.73321 12.4607 4.70242 12.5761 4.66808 12.7451L4.54113 13.4619L4.14269 15.8555L4.14171 15.8574H4.14464L6.5382 15.458L7.25499 15.332C7.424 15.2977 7.5394 15.2669 7.64953 15.2266L7.80285 15.165C7.95455 15.0986 8.09947 15.0174 8.23644 14.9238L8.3839 14.8135C8.53668 14.6876 8.72225 14.5035 9.0714 14.1543L14.0587 9.16602L10.8331 5.94044L5.84581 10.9287ZM15.3634 4.63673C14.5281 3.80141 13.2057 3.74938 12.3097 4.48048L12.1368 4.63673L11.7735 5.00001L15.0001 8.22559L15.3634 7.86329L15.5196 7.68946C16.2015 6.85326 16.2015 5.64676 15.5196 4.81056L15.3634 4.63673Z"></path>
+          </svg>
+                  <span>Rename</span>
+                </button>
+                )}
+                {messages.length > 0 && (
+                  <>
+                    <button
+                      className="header-menu-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadChatAsPDF();
+                      }}
+                      aria-label="Download chat as PDF"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="icon">
+                        <path d="M10 2.5C10.4142 2.5 10.75 2.83579 10.75 3.25V11.4393L12.9697 9.21967C13.2626 8.92678 13.7374 8.92678 14.0303 9.21967C14.3232 9.51256 14.3232 9.98744 14.0303 10.2803L10.5303 13.7803C10.2374 14.0732 9.76256 14.0732 9.46967 13.7803L5.96967 10.2803C5.67678 9.98744 5.67678 9.51256 5.96967 9.21967C6.26256 8.92678 6.73744 8.92678 7.03033 9.21967L9.25 11.4393V3.25C9.25 2.83579 9.58579 2.5 10 2.5Z"></path>
+                        <path d="M3.5 14.25C3.5 13.8358 3.16421 13.5 2.75 13.5C2.33579 13.5 2 13.8358 2 14.25V16.25C2 17.2165 2.7835 18 3.75 18H16.25C17.2165 18 18 17.2165 18 16.25V14.25C18 13.8358 17.6642 13.5 17.25 13.5C16.8358 13.5 16.5 13.8358 16.5 14.25V16H3.5V14.25Z"></path>
+            </svg>
+                      <span>Download</span>
+          </button>
+                    <button
+                      className="header-menu-item header-menu-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenHeaderMenu(false);
+                        if (onDeleteChat && chatId) {
+                          // Create a chat object for the delete confirmation
+                          const chat = { id: chatId, title: chatTitle, messages: messages };
+                          // Call confirmDeleteChat with chatId and event
+                          onDeleteChat(chatId, e);
+                        }
+                      }}
+                      aria-label="Delete chat"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="icon" aria-hidden="true">
+                        <path d="M10.6299 1.33496C12.0335 1.33496 13.2695 2.25996 13.666 3.60645L13.8809 4.33496H17L17.1338 4.34863C17.4369 4.41057 17.665 4.67858 17.665 5C17.665 5.32142 17.4369 5.58943 17.1338 5.65137L17 5.66504H16.6543L15.8574 14.9912C15.7177 16.629 14.3478 17.8877 12.7041 17.8877H7.2959C5.75502 17.8877 4.45439 16.7815 4.18262 15.2939L4.14258 14.9912L3.34668 5.66504H3C2.63273 5.66504 2.33496 5.36727 2.33496 5C2.33496 4.63273 2.63273 4.33496 3 4.33496H6.11914L6.33398 3.60645L6.41797 3.3584C6.88565 2.14747 8.05427 1.33496 9.37012 1.33496H10.6299ZM5.46777 14.8779L5.49121 15.0537C5.64881 15.9161 6.40256 16.5576 7.2959 16.5576H12.7041C13.6571 16.5576 14.4512 15.8275 14.5322 14.8779L15.3193 5.66504H4.68164L5.46777 14.8779ZM7.66797 12.8271V8.66016C7.66797 8.29299 7.96588 7.99528 8.33301 7.99512C8.70028 7.99512 8.99805 8.29289 8.99805 8.66016V12.8271C8.99779 13.1942 8.70012 13.4912 8.33301 13.4912C7.96604 13.491 7.66823 13.1941 7.66797 12.8271ZM11.002 12.8271V8.66016C11.002 8.29289 11.2997 7.99512 11.667 7.99512C12.0341 7.9953 12.332 8.293 12.332 8.66016V12.8271C12.3318 13.1941 12.0339 13.491 11.667 13.4912C11.2999 13.4912 11.0022 13.1942 11.002 12.8271ZM9.37012 2.66504C8.60726 2.66504 7.92938 3.13589 7.6582 3.83789L7.60938 3.98145L7.50586 4.33496H12.4941L12.3906 3.98145C12.1607 3.20084 11.4437 2.66504 10.6299 2.66504H9.37012Z"></path>
+            </svg>
+                      <span>Delete</span>
+          </button>
+                  </>
+                )}
+              </div>
+            )}
+        </div>
+        )}
       </div>
       <div className="main-content">
         <div className={`messages-container ${messages.length > 0 ? 'has-messages' : ''}`}>
@@ -239,30 +494,30 @@ function ChatView({ chatId, currentModel, onChatUpdate }) {
             messages.map((msg, idx) => (
               <div key={idx} className={`message ${msg.role}`}>
                 <div className="message-wrapper">
-                  <div className="message-content">
-                    {msg.content ? (
-                      <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          code: ({ node, inline, className, children, ...props }) => {
-                            const match = /language-(\w+)/.exec(className || '');
-                            const language = match ? match[1] : '';
-                            const codeString = String(children).replace(/\n$/, '');
-                            
-                            return !inline && language ? (
-                              <CodeBlock language={language} codeString={codeString} />
-                            ) : (
-                              <code className={className} {...props}>
-                                {children}
-                              </code>
-                            );
-                          },
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                    ) : (
-                      <i className="fa-solid fa-circle fa-beat"></i>
+                <div className="message-content">
+                  {msg.content ? (
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code: ({ node, inline, className, children, ...props }) => {
+                          const match = /language-(\w+)/.exec(className || '');
+                          const language = match ? match[1] : '';
+                          const codeString = String(children).replace(/\n$/, '');
+                          
+                          return !inline && language ? (
+                            <CodeBlock language={language} codeString={codeString} />
+                          ) : (
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          );
+                        },
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  ) : (
+                    <i className="fa-solid fa-circle fa-beat"></i>
                     )}
                   </div>
                   {msg.content && (
