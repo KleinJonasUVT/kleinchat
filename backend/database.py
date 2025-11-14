@@ -2,7 +2,7 @@
 Database module using SQLAlchemy ORM.
 Provides functions for chat and message operations.
 """
-from models import db, Chat, Message
+from models import db, Chat, Message, UserSettings
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -81,3 +81,20 @@ def delete_chat(chat_id: str):
     if chat:
         db.session.delete(chat)
         db.session.commit()
+
+
+def get_setting(key: str, default: str = '') -> str:
+    """Get a user setting by key. Returns default if not found."""
+    setting = UserSettings.query.filter_by(key=key).first()
+    return setting.value if setting else default
+
+
+def set_setting(key: str, value: str):
+    """Set a user setting. Creates if doesn't exist, updates if exists."""
+    setting = UserSettings.query.filter_by(key=key).first()
+    if setting:
+        setting.value = value
+    else:
+        setting = UserSettings(key=key, value=value)
+        db.session.add(setting)
+    db.session.commit()

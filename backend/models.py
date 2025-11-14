@@ -58,3 +58,21 @@ class Message(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
+
+class UserSettings(db.Model):
+    """User settings model for storing user preferences."""
+    __tablename__ = 'user_settings'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    key = db.Column(db.String(100), unique=True, nullable=False)
+    value = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    def to_dict(self):
+        """Convert settings to dictionary."""
+        return {
+            'key': self.key,
+            'value': self.value,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
