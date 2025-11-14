@@ -2,20 +2,23 @@
 Flask backend for streaming Ollama chat responses with SQLite persistence.
 """
 import os
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, session, redirect, url_for
 from flask_cors import CORS
 from flask_migrate import Migrate
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
 import ollama
 import json
 from datetime import datetime
 import threading
 import queue
-from models import db
+from google.oauth2 import id_token
+from google.auth.transport import requests
+from models import db, User, Chat
 from database import (
         create_chat, get_chat, get_all_chats,
         add_message, update_chat_title, delete_chat, find_empty_chat,
-        get_setting, set_setting
+        get_setting, set_setting, get_or_create_user
     )
 
 # Load environment variables from .env file
@@ -27,20 +30,31 @@ app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "chats.db")}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['GOOGLE_CLIENT_ID'] = os.getenv('GOOGLE_CLIENT_ID', '')
 
 # Initialize extensions
 db.init_app(app)
 migrate = Migrate(app, db)
 
-# Enable CORS with explicit configuration for streaming
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = None  # We handle login via API, not Flask views
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(user_id)
+
+# Enable CORS with explicit configuration for streaming and authentication
 CORS(app, resources={
     r"/api/*": {
         "origins": "http://localhost:3000",
         "methods": ["GET", "POST", "OPTIONS", "DELETE", "PUT"],
         "allow_headers": ["Content-Type"],
-        "supports_credentials": False
+        "supports_credentials": True
     }
-}, supports_credentials=False)
+}, supports_credentials=True)
 
 # Get current date, also with the time up to the second
 current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -50,6 +64,7 @@ print(f"Current date: {current_date}")
 # Run: flask db upgrade to create tables
 
 @app.route('/api/chat', methods=['POST', 'OPTIONS'])
+@login_required
 def chat():
     """
     Stream chat responses from Ollama and save to database.
@@ -62,6 +77,7 @@ def chat():
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     try:
         data = request.json
@@ -70,18 +86,30 @@ def chat():
         chat_id = data.get('chat_id')
         
         if not user_message:
-            return jsonify({'error': 'Message is required'}), 400
+            response = jsonify({'error': 'Message is required'})
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response, 400
+        
+        # Check authentication
+        if not current_user.is_authenticated:
+            response = jsonify({'error': 'Authentication required'})
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response, 401
+        
+        user_id = current_user.get_id()
         
         # Use existing empty chat or create new chat if chat_id not provided
         if not chat_id:
             # Check if there's an existing empty chat
-            empty_chat_id = find_empty_chat()
+            empty_chat_id = find_empty_chat(user_id)
             if empty_chat_id:
                 chat_id = empty_chat_id
             else:
                 # Generate title from first 50 chars of message
                 title = user_message[:50] + ('...' if len(user_message) > 50 else '')
-                chat_id = create_chat(title, model)
+                chat_id = create_chat(user_id, title, model)
         
         # Check if this is the first message in the chat and update title
         chat = get_chat(chat_id)
@@ -101,8 +129,7 @@ def chat():
         ]
         
         # Get custom instructions from database (or use empty string if not set)
-        custom_instructions = get_setting('custom_instructions', '')
-        print(f"Custom instructions: {custom_instructions}")
+        custom_instructions = get_setting(user_id, 'custom_instructions', '')
         
         # Build system prompt with custom instructions
         if custom_instructions:
@@ -243,6 +270,7 @@ def chat():
                 error_data = json.dumps({'error': str(e)})
                 yield f"data: {error_data}\n\n"
         
+        # Return the streaming response
         return Response(
             generate(),
             mimetype='text/event-stream',
@@ -251,30 +279,38 @@ def chat():
                 'X-Accel-Buffering': 'no',
                 'Access-Control-Allow-Origin': 'http://localhost:3000',
                 'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type'
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Credentials': 'true'
             }
         )
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        response = jsonify({'error': str(e)})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 500
 
 @app.route('/api/chats', methods=['GET', 'OPTIONS'])
+@login_required
 def get_chats():
-    """Get all chats."""
+    """Get all chats for the current user."""
     if request.method == 'OPTIONS':
         response = jsonify({})
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     
     try:
-        chats = get_all_chats()
+        user_id = current_user.get_id()
+        chats = get_all_chats(user_id)
         return jsonify(chats)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chats', methods=['POST', 'OPTIONS'])
+@login_required
 def create_new_chat():
     """Create a new chat or return existing empty chat."""
     if request.method == 'OPTIONS':
@@ -282,27 +318,30 @@ def create_new_chat():
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     
     try:
+        user_id = current_user.get_id()
         data = request.json or {}
         title = data.get('title', 'New Chat')
         model = data.get('model', 'gemma3:1b')
         
         # Check if there's an existing empty chat
-        empty_chat_id = find_empty_chat()
+        empty_chat_id = find_empty_chat(user_id)
         if empty_chat_id:
             chat = get_chat(empty_chat_id)
             return jsonify(chat), 200
         
         # Create new chat if no empty chat exists
-        chat_id = create_chat(title, model)
+        chat_id = create_chat(user_id, title, model)
         chat = get_chat(chat_id)
         return jsonify(chat), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chats/<chat_id>', methods=['GET', 'PUT', 'DELETE', 'OPTIONS'])
+@login_required
 def handle_chat_by_id(chat_id):
     """Handle GET, PUT, and DELETE operations for a specific chat."""
     # Handle preflight OPTIONS request
@@ -311,34 +350,177 @@ def handle_chat_by_id(chat_id):
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Max-Age', '3600')
         return response
     
     try:
+        user_id = current_user.get_id()
+        
         if request.method == 'GET':
             # Get a specific chat with its messages
             chat = get_chat(chat_id)
             if not chat:
-                return jsonify({'error': 'Chat not found'}), 404
-            return jsonify(chat)
+                response = jsonify({'error': 'Chat not found'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 404
+            # Verify chat belongs to user
+            chat_obj = Chat.query.get(chat_id)
+            if chat_obj and chat_obj.user_id != user_id:
+                response = jsonify({'error': 'Unauthorized'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 403
+            response = jsonify(chat)
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
         
         elif request.method == 'PUT':
             # Update a chat (e.g., title)
+            chat_obj = Chat.query.get(chat_id)
+            if not chat_obj:
+                response = jsonify({'error': 'Chat not found'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 404
+            if chat_obj.user_id != user_id:
+                response = jsonify({'error': 'Unauthorized'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 403
             data = request.json or {}
             if 'title' in data:
                 update_chat_title(chat_id, data['title'])
             chat = get_chat(chat_id)
-            if not chat:
-                return jsonify({'error': 'Chat not found'}), 404
-            return jsonify(chat)
+            response = jsonify(chat)
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
         
         elif request.method == 'DELETE':
             # Delete a chat
+            chat_obj = Chat.query.get(chat_id)
+            if not chat_obj:
+                response = jsonify({'error': 'Chat not found'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 404
+            if chat_obj.user_id != user_id:
+                response = jsonify({'error': 'Unauthorized'})
+                response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response, 403
             delete_chat(chat_id)
-            return jsonify({'success': True}), 200
+            response = jsonify({'success': True})
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response, 200
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        response = jsonify({'error': str(e)})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 500
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def login():
+    """Authenticate user with Google OAuth token."""
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
+    try:
+        data = request.json
+        token = data.get('token')
+        
+        if not token:
+            return jsonify({'error': 'Token is required'}), 400
+        
+        # Verify the token with Google
+        try:
+            idinfo = id_token.verify_oauth2_token(
+                token, requests.Request(), app.config['GOOGLE_CLIENT_ID']
+            )
+            
+            # Verify the issuer
+            if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                raise ValueError('Wrong issuer.')
+            
+            # Get user info
+            google_id = idinfo['sub']
+            email = idinfo['email']
+            name = idinfo.get('name', '')
+            picture = idinfo.get('picture', '')
+            
+            # Get or create user
+            user = get_or_create_user(google_id, email, name, picture)
+            
+            # Log the user in
+            login_user(user, remember=True)
+            
+            response = jsonify({
+                'success': True,
+                'user': user.to_dict()
+            })
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        except ValueError as e:
+            response = jsonify({'error': f'Invalid token: {str(e)}'})
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response, 401
+    except Exception as e:
+        response = jsonify({'error': str(e)})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 500
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+@login_required
+def logout():
+    """Logout the current user."""
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
+    logout_user()
+    response = jsonify({'success': True})
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+@app.route('/api/auth/me', methods=['GET', 'OPTIONS'])
+def get_current_user():
+    """Get the current authenticated user."""
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
+    if current_user.is_authenticated:
+        response = jsonify({'user': current_user.to_dict()})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    else:
+        response = jsonify({'user': None})
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 401
 
 @app.route('/api/health', methods=['GET'])
 def health():
@@ -346,6 +528,7 @@ def health():
     return jsonify({'status': 'ok'})
 
 @app.route('/api/settings', methods=['GET', 'PUT', 'OPTIONS'])
+@login_required
 def handle_settings():
     """Handle GET and PUT operations for user settings."""
     if request.method == 'OPTIONS':
@@ -353,11 +536,14 @@ def handle_settings():
         response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
+    
+    user_id = current_user.get_id()
     
     if request.method == 'GET':
         try:
-            custom_instructions = get_setting('custom_instructions', '')
+            custom_instructions = get_setting(user_id, 'custom_instructions', '')
             return jsonify({
                 'custom_instructions': custom_instructions
             })
@@ -368,7 +554,7 @@ def handle_settings():
         try:
             data = request.json
             custom_instructions = data.get('custom_instructions', '')
-            set_setting('custom_instructions', custom_instructions)
+            set_setting(user_id, 'custom_instructions', custom_instructions)
             return jsonify({
                 'message': 'Settings updated successfully',
                 'custom_instructions': custom_instructions

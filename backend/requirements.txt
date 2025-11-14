@@ -2,6 +2,10 @@ flask==3.0.0
 flask-cors==4.0.0
 flask-sqlalchemy==3.1.1
 flask-migrate==4.0.5
+flask-login==0.6.3
 ollama==0.1.7
 python-dotenv==1.0.0
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
 

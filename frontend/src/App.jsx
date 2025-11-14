@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom';
 import './App.css';
 import ChatView from './ChatView';
+import Login from './Login';
 
 function App() {
   return (
@@ -29,22 +30,81 @@ function AppContent() {
   const [chatToDelete, setChatToDelete] = useState(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [customInstructions, setCustomInstructions] = useState('');
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const isCreatingChatRef = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Load chats from database
+  // Check authentication on mount
   useEffect(() => {
-    loadChats();
-    loadSettings();
+    checkAuth();
   }, []);
+
+  // Load chats and settings when authenticated, and create new chat if on base route
+  useEffect(() => {
+    if (user) {
+      loadChats();
+      loadSettings();
+      // If on base route, create a new chat after a short delay to ensure state is ready
+      if (location.pathname === '/' && !isCreatingChatRef.current) {
+        setTimeout(() => {
+          if (!isCreatingChatRef.current) {
+            handleNewChat();
+          }
+        }, 100);
+      }
+    }
+  }, [user]);
+
+  const checkAuth = async () => {
+    try {
+      const response = await fetch('http://localhost:5001/api/auth/me', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user) {
+          setUser(data.user);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking auth:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = (userData) => {
+    setUser(userData);
+    navigate('/');
+    // The useEffect hook will automatically create a new chat when user is set
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('http://localhost:5001/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      setUser(null);
+      navigate('/');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
 
   const loadSettings = async () => {
     try {
-      const response = await fetch('http://localhost:5001/api/settings');
+      const response = await fetch('http://localhost:5001/api/settings', {
+        credentials: 'include',
+      });
       if (response.ok) {
         const settings = await response.json();
         setCustomInstructions(settings.custom_instructions || '');
+      } else if (response.status === 401) {
+        setUser(null);
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -58,6 +118,7 @@ function AppContent() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           custom_instructions: customInstructions,
         }),
@@ -67,6 +128,9 @@ function AppContent() {
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error('Error saving settings:', errorData.error || 'Unknown error');
+        if (response.status === 401) {
+          setUser(null);
+        }
       }
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -106,19 +170,23 @@ function AppContent() {
     }
   }, [isSearchModalOpen]);
 
-  // Auto-create new chat when on base route
+  // Auto-create new chat when on base route and user is logged in
   useEffect(() => {
-    if (location.pathname === '/' && !isCreatingChatRef.current) {
+    if (location.pathname === '/' && user && !isCreatingChatRef.current) {
       handleNewChat();
     }
-  }, [location.pathname]);
+  }, [location.pathname, user]);
 
   const loadChats = async () => {
     try {
-      const response = await fetch('http://localhost:5001/api/chats');
+      const response = await fetch('http://localhost:5001/api/chats', {
+        credentials: 'include',
+      });
       if (response.ok) {
         const chatsData = await response.json();
         setChats(chatsData);
+      } else if (response.status === 401) {
+        setUser(null);
       }
     } catch (error) {
       console.error('Error loading chats:', error);
@@ -152,19 +220,20 @@ function AppContent() {
   };
 
   const deleteChat = async () => {
-    if (!chatToDelete) return;
-    
-    const chatId = chatToDelete.id;
-    
-    try {
-      console.log('Deleting chat:', chatId);
-      const response = await fetch(`http://localhost:5001/api/chats/${chatId}`, {
-        method: 'DELETE',
-        mode: 'cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+        if (!chatToDelete) return;
+        
+        const chatId = chatToDelete.id;
+        
+        try {
+          console.log('Deleting chat:', chatId);
+          const response = await fetch(`http://localhost:5001/api/chats/${chatId}`, {
+            method: 'DELETE',
+            mode: 'cors',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+          });
       
       if (response.ok) {
         const result = await response.json();
@@ -204,20 +273,21 @@ function AppContent() {
   };
 
   const saveRename = async (chatId) => {
-    if (!editingTitle.trim()) {
-      setEditingChatId(null);
-      return;
-    }
+        if (!editingTitle.trim()) {
+          setEditingChatId(null);
+          return;
+        }
 
-    try {
-      const response = await fetch(`http://localhost:5001/api/chats/${chatId}`, {
-        method: 'PUT',
-        mode: 'cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ title: editingTitle.trim() }),
-      });
+        try {
+          const response = await fetch(`http://localhost:5001/api/chats/${chatId}`, {
+            method: 'PUT',
+            mode: 'cors',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({ title: editingTitle.trim() }),
+          });
 
       if (response.ok) {
         await loadChats(); // Refresh chat list
@@ -250,6 +320,7 @@ function AppContent() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           title: 'New Chat',
           model: currentModel,
@@ -313,16 +384,25 @@ function AppContent() {
     ? location.pathname.split('/c/')[1] 
     : null;
 
-  // Group chats by date
-  const groupedChats = {
-    'Today': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Today'),
-    'Yesterday': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Yesterday'),
-    'This week': filteredChats.filter(chat => formatDate(chat.updated_at) === 'This week'),
-    'Earlier': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Earlier'),
-  };
+      // Group chats by date
+      const groupedChats = {
+        'Today': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Today'),
+        'Yesterday': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Yesterday'),
+        'This week': filteredChats.filter(chat => formatDate(chat.updated_at) === 'This week'),
+        'Earlier': filteredChats.filter(chat => formatDate(chat.updated_at) === 'Earlier'),
+      };
 
-  return (
-    <div className={`app ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      // Show login screen if not authenticated
+      if (loading) {
+        return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
+      }
+
+      if (!user) {
+        return <Login onLogin={handleLogin} />;
+      }
+
+      return (
+        <div className={`app ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
       {/* Main Content Wrapper */}
       <div className="app-content">
         {/* Sidebar */}

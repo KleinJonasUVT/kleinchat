@@ -27,6 +27,7 @@ function ChatView({ chatId, currentModel, onChatUpdate, onDeleteChat, onNewChat 
     try {
       const response = await fetch(`http://localhost:5001/api/chats/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
       if (response.ok) {
         // Refresh the chat list in the sidebar
@@ -77,7 +78,9 @@ function ChatView({ chatId, currentModel, onChatUpdate, onDeleteChat, onNewChat 
 
   const loadChat = async (id) => {
     try {
-      const response = await fetch(`http://localhost:5001/api/chats/${id}`);
+      const response = await fetch(`http://localhost:5001/api/chats/${id}`, {
+        credentials: 'include',
+      });
       if (response.ok) {
         const chat = await response.json();
         setChatTitle(chat.title || 'Untitled Chat');
@@ -134,6 +137,7 @@ function ChatView({ chatId, currentModel, onChatUpdate, onDeleteChat, onNewChat 
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           message: userMessage,
           model: currentModel,
@@ -321,6 +325,7 @@ function ChatView({ chatId, currentModel, onChatUpdate, onDeleteChat, onNewChat 
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ title: tempTitle.trim() }),
       });
 

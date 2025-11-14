@@ -2,7 +2,7 @@
 Database module using SQLAlchemy ORM.
 Provides functions for chat and message operations.
 """
-from models import db, Chat, Message, UserSettings
+from models import db, Chat, Message, UserSettings, User
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -11,9 +11,31 @@ from datetime import datetime
 # Database initialization happens in app.py with db.create_all()
 
 
-def create_chat(title: str, model: str = 'gemma3:1b') -> str:
+def get_or_create_user(google_id: str, email: str, name: str = None, picture: str = None) -> User:
+    """Get or create a user by Google ID."""
+    user = User.query.filter_by(google_id=google_id).first()
+    if not user:
+        user = User(
+            google_id=google_id,
+            email=email,
+            name=name,
+            picture=picture
+        )
+        db.session.add(user)
+        db.session.commit()
+    else:
+        # Update last login and user info
+        user.last_login = datetime.utcnow()
+        if name:
+            user.name = name
+        if picture:
+            user.picture = picture
+        db.session.commit()
+    return user
+
+def create_chat(user_id: str, title: str, model: str = 'gemma3:1b') -> str:
     """Create a new chat and return its UUID."""
-    chat = Chat(title=title, model=model)
+    chat = Chat(user_id=user_id, title=title, model=model)
     db.session.add(chat)
     db.session.commit()
     return chat.id
@@ -27,18 +49,18 @@ def get_chat(chat_id: str) -> Optional[Dict]:
     return chat.to_dict()
 
 
-def get_all_chats() -> List[Dict]:
-    """Get all chats ordered by most recently updated."""
-    chats = Chat.query.order_by(Chat.updated_at.desc()).all()
+def get_all_chats(user_id: str) -> List[Dict]:
+    """Get all chats for a user, ordered by most recently updated."""
+    chats = Chat.query.filter_by(user_id=user_id).order_by(Chat.updated_at.desc()).all()
     return [chat.to_dict() for chat in chats]
 
 
-def find_empty_chat() -> Optional[str]:
-    """Find the most recently created chat with no messages. Returns chat_id or None."""
+def find_empty_chat(user_id: str) -> Optional[str]:
+    """Find the most recently created chat with no messages for a user. Returns chat_id or None."""
     # Find chats with no messages, ordered by most recently created
     # Use left join to find chats without messages
     from sqlalchemy.orm import outerjoin
-    chat = Chat.query.outerjoin(Message, Chat.id == Message.chat_id).filter(Message.id == None).order_by(Chat.created_at.desc()).first()
+    chat = Chat.query.filter_by(user_id=user_id).outerjoin(Message, Chat.id == Message.chat_id).filter(Message.id == None).order_by(Chat.created_at.desc()).first()
     return chat.id if chat else None
 
 
@@ -83,18 +105,18 @@ def delete_chat(chat_id: str):
         db.session.commit()
 
 
-def get_setting(key: str, default: str = '') -> str:
+def get_setting(user_id: str, key: str, default: str = '') -> str:
     """Get a user setting by key. Returns default if not found."""
-    setting = UserSettings.query.filter_by(key=key).first()
+    setting = UserSettings.query.filter_by(user_id=user_id, key=key).first()
     return setting.value if setting else default
 
 
-def set_setting(key: str, value: str):
+def set_setting(user_id: str, key: str, value: str):
     """Set a user setting. Creates if doesn't exist, updates if exists."""
-    setting = UserSettings.query.filter_by(key=key).first()
+    setting = UserSettings.query.filter_by(user_id=user_id, key=key).first()
     if setting:
         setting.value = value
     else:
-        setting = UserSettings(key=key, value=value)
+        setting = UserSettings(user_id=user_id, key=key, value=value)
         db.session.add(setting)
     db.session.commit()

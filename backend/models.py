@@ -13,6 +13,7 @@ class Chat(db.Model):
     __tablename__ = 'chats'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     title = db.Column(db.String(255), nullable=False)
     model = db.Column(db.String(100), nullable=False, default='gemma3:1b')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -59,14 +60,57 @@ class Message(db.Model):
         }
 
 
+class User(db.Model):
+    """User model for authentication."""
+    __tablename__ = 'users'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    google_id = db.Column(db.String(255), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(255), nullable=True)
+    picture = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_login = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship to chats
+    chats = db.relationship('Chat', backref='user', lazy=True, cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        """Convert user to dictionary."""
+        return {
+            'id': self.id,
+            'email': self.email,
+            'name': self.name,
+            'picture': self.picture,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_login': self.last_login.isoformat() if self.last_login else None
+        }
+    
+    def is_authenticated(self):
+        return True
+    
+    def is_active(self):
+        return True
+    
+    def is_anonymous(self):
+        return False
+    
+    def get_id(self):
+        return str(self.id)
+
+
 class UserSettings(db.Model):
     """User settings model for storing user preferences."""
     __tablename__ = 'user_settings'
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    key = db.Column(db.String(100), unique=True, nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    key = db.Column(db.String(100), nullable=False)
     value = db.Column(db.Text, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Unique constraint on user_id and key
+    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='uq_user_setting'),)
     
     def to_dict(self):
         """Convert settings to dictionary."""
